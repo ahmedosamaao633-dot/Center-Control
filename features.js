@@ -352,9 +352,10 @@ const LBL_PRESETS = {
 const LBL_DEF = { ...LBL_PRESETS['50x25'], pad: 4 };
 const lbl = () => { try { return { ...LBL_DEF, ...JSON.parse(localStorage.getItem('lbl') || '{}') }; } catch (e) { return { ...LBL_DEF }; } };
 (function () { const st = document.createElement('style'); st.textContent = '.lbl{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#000;background:#fff;font-family:Tajawal,Arial,sans-serif;overflow:hidden;line-height:1.15;break-after:page;page-break-after:always}.lbl:last-child{break-after:auto;page-break-after:auto}.lblprev{border:1px dashed #999;display:inline-block;background:#fff;box-shadow:var(--sh)}'; document.head.appendChild(st); })();
+let _cv; function txtMm(t, pt) { try { _cv = _cv || document.createElement('canvas').getContext('2d'); _cv.font = '800 ' + (pt * 96 / 72) + 'px Tajawal, Arial, sans-serif'; return _cv.measureText(String(t || '')).width * 25.4 / 96; } catch (e) { return String(t || '').length * pt * 0.3528 * 0.64; } }
 function labelFit(s, o) {
   const avail = o.w - 2 * o.m, notes = [], mm = p => p * 0.3528;
-  let fs = Math.max(7, o.name); const cap = (avail - 1) / (fs * 0.3528 * 0.64); if (s.name.length > cap) fs = Math.max(7, fs * cap / s.name.length);
+  let fs = Math.max(7, o.name); const tw = txtMm(s.name, fs); if (tw > avail - 0.5) fs = Math.max(6, fs * (avail - 0.5) / tw * 0.97);
   const subN = Math.max(6, Math.min(9, o.name - 3)); let bar = o.bar, showC = !!o.center, showY = !!(o.year && yearName(s.yearId));
   const H = o.h ? Math.max(8, o.h - 0.5) : 0;
   if (H) {
@@ -368,7 +369,7 @@ function labelFit(s, o) {
 }
 function labelHtml(s, o) {
   const L = labelFit(s, o), svg = barcodeSvg(s.code, { h: L.bar, narrow: o.narrow, maxW: L.avail });
-  return `<div class="lbl" style="width:${o.w}mm;${L.H ? 'height:' + L.H + 'mm;max-height:' + L.H + 'mm;' : ''}padding:${o.m}mm">${L.showC ? `<div style="font-size:${L.sub};font-weight:700">${esc(S().center)}</div>` : ''}${L.showY ? `<div style="font-size:${L.sub}">${esc(yearName(s.yearId))}</div>` : ''}<div style="font-size:${L.fs.toFixed(1)}pt;font-weight:800;margin:1mm 0">${esc(s.name)}</div>${svg}${o.code ? `<div style="font-size:${L.sub};letter-spacing:1px;margin-top:.5mm">${esc(barVal(s.code))}</div>` : ''}</div>`;
+  return `<div class="lbl" style="width:${o.w}mm;${L.H ? 'height:' + L.H + 'mm;max-height:' + L.H + 'mm;' : ''}padding:${o.m}mm">${L.showC ? `<div style="font-size:${L.sub};font-weight:700">${esc(S().center)}</div>` : ''}${L.showY ? `<div style="font-size:${L.sub}">${esc(yearName(s.yearId))}</div>` : ''}<div style="font-size:${L.fs.toFixed(1)}pt;font-weight:800;margin:1mm 0;white-space:nowrap">${esc(s.name)}</div>${svg}${o.code ? `<div style="font-size:${L.sub};letter-spacing:1px;margin-top:.5mm">${esc(barVal(s.code))}</div>` : ''}</div>`;
 }
 function printLabels(list) {
   const o = lbl(); if (!list.length) return toast('لا يوجد طلاب للطباعة', true);
