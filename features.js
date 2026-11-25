@@ -352,11 +352,23 @@ const LBL_PRESETS = {
 const LBL_DEF = { ...LBL_PRESETS['50x25'], pad: 4 };
 const lbl = () => { try { return { ...LBL_DEF, ...JSON.parse(localStorage.getItem('lbl') || '{}') }; } catch (e) { return { ...LBL_DEF }; } };
 (function () { const st = document.createElement('style'); st.textContent = '.lbl{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#000;background:#fff;font-family:Tajawal,Arial,sans-serif;overflow:hidden;line-height:1.15;break-after:page;page-break-after:always}.lbl:last-child{break-after:auto;page-break-after:auto}.lblprev{border:1px dashed #999;display:inline-block;background:#fff;box-shadow:var(--sh)}'; document.head.appendChild(st); })();
+function labelFit(s, o) {
+  const avail = o.w - 2 * o.m, notes = [], mm = p => p * 0.3528;
+  let fs = Math.max(7, o.name); const cap = avail / (fs * 0.3528 * 0.52); if (s.name.length > cap) fs = Math.max(7, fs * cap / s.name.length);
+  const subN = Math.max(6, Math.min(9, o.name - 3)); let bar = o.bar, showC = !!o.center, showY = !!(o.year && yearName(s.yearId));
+  const H = o.h ? Math.max(8, o.h - 0.5) : 0;
+  if (H) {
+    const room = H - 2 * o.m, est = () => (showC ? mm(subN) * 1.35 : 0) + (showY ? mm(subN) * 1.35 : 0) + mm(fs) * 1.45 + 2 + bar + (o.code ? mm(subN) * 1.35 + 0.5 : 0);
+    if (est() > room && showC) { showC = false; notes.push('اتشال اسم السنتر تلقائيًا'); }
+    if (est() > room && showY) { showY = false; notes.push('اتشال الصف تلقائيًا'); }
+    if (est() > room && bar > 6) { bar = Math.max(6, bar - (est() - room)); notes.push('اتصغّر الباركود'); }
+    if (est() > room && fs > 7) { fs = Math.max(7, fs - (est() - room) / (0.3528 * 1.45)); notes.push('اتصغّر الاسم'); }
+  }
+  return { H, avail, fs, sub: subN + 'pt', bar, showC, showY, notes };
+}
 function labelHtml(s, o) {
-  const avail = o.w - 2 * o.m, svg = barcodeSvg(s.code, { h: o.bar, narrow: o.narrow, maxW: avail });
-  let fs = o.name; const cap = avail / (fs * 0.3528 * 0.52); if (s.name.length > cap) fs = Math.max(7, fs * cap / s.name.length);
-  const sub = Math.max(6, Math.min(9, o.name - 3)) + 'pt';
-  return `<div class="lbl" style="width:${o.w}mm;${o.h ? 'height:' + o.h + 'mm;' : ''}padding:${o.m}mm">${o.center ? `<div style="font-size:${sub};font-weight:700">${esc(S().center)}</div>` : ''}${o.year && yearName(s.yearId) ? `<div style="font-size:${sub}">${esc(yearName(s.yearId))}</div>` : ''}<div style="font-size:${fs.toFixed(1)}pt;font-weight:800;margin:1mm 0">${esc(s.name)}</div>${svg}${o.code ? `<div style="font-size:${sub};letter-spacing:1px;margin-top:.5mm">${esc(barVal(s.code))}</div>` : ''}</div>`;
+  const L = labelFit(s, o), svg = barcodeSvg(s.code, { h: L.bar, narrow: o.narrow, maxW: L.avail });
+  return `<div class="lbl" style="width:${o.w}mm;${L.H ? 'height:' + L.H + 'mm;max-height:' + L.H + 'mm;' : ''}padding:${o.m}mm">${L.showC ? `<div style="font-size:${L.sub};font-weight:700">${esc(S().center)}</div>` : ''}${L.showY ? `<div style="font-size:${L.sub}">${esc(yearName(s.yearId))}</div>` : ''}<div style="font-size:${L.fs.toFixed(1)}pt;font-weight:800;margin:1mm 0">${esc(s.name)}</div>${svg}${o.code ? `<div style="font-size:${L.sub};letter-spacing:1px;margin-top:.5mm">${esc(barVal(s.code))}</div>` : ''}</div>`;
 }
 function printLabels(list) {
   const o = lbl(); if (!list.length) return toast('لا يوجد طلاب للطباعة', true);
@@ -382,7 +394,7 @@ M.cards = () => {
     const o = { ...LBL_DEF, ...read() }; if (!(o.w > 10)) o.w = 58; if (!(o.narrow > 0)) o.narrow = 0.33; try { localStorage.setItem('lbl', JSON.stringify(o)); } catch (e) { }
     const s = activeStudents()[0] || { name: 'اسم الطالب', code: '1001', yearId: '' };
     $('#lprev').innerHTML = labelHtml(s, o); const sv = $('#lprev svg'), nw = sv ? +sv.dataset.narrow : 1;
-    const L = $('#lprev .lbl'), over = L && o.h && contentOverflow(L); $('#lwarn').textContent = nw < 0.2 ? '⚠️ الباركود ضيق قوي وممكن القارئ مايقراهوش. كبّر عرض الملصق أو قلّل الهامش أو استخدم كود أقصر.' : over ? '⚠️ المحتوى أطول من الملصق. صغّر الاسم أو ارتفاع الباركود أو شيل اسم السنتر/الصف.' : '';
+    const L = $('#lprev .lbl'), over = L && o.h && contentOverflow(L); $('#lwarn').textContent = nw < 0.2 ? '⚠️ الباركود ضيق قوي وممكن القارئ مايقراهوش. كبّر عرض الملصق أو قلّل الهامش أو استخدم كود أقصر.' : over ? '⚠️ المحتوى أطول من الملصق. صغّر الاسم أو ارتفاع الباركود أو شيل اسم السنتر/الصف.' : (() => { const n = labelFit(s, o).notes; return n.length ? 'ℹ️ ' + n.join('، ') + ' علشان يناسب الملصق' : ''; })();
   };
   Object.keys(ids).concat(['lc', 'ly', 'lcode']).forEach(i => $('#' + i).oninput = draw);
   $('#lpre').onchange = e => { const P = LBL_PRESETS[e.target.value]; if (!P) return; Object.entries(ids).forEach(([i, k]) => { $('#' + i).value = P[k] ?? $('#' + i).value; }); $('#lc').checked = P.center; $('#ly').checked = P.year; $('#lcode').checked = P.code; draw(); };
