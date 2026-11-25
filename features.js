@@ -354,7 +354,7 @@ const lbl = () => { try { return { ...LBL_DEF, ...JSON.parse(localStorage.getIte
 (function () { const st = document.createElement('style'); st.textContent = '.lbl{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#000;background:#fff;font-family:Tajawal,Arial,sans-serif;overflow:hidden;line-height:1.15;break-after:page;page-break-after:always}.lbl:last-child{break-after:auto;page-break-after:auto}.lblprev{border:1px dashed #999;display:inline-block;background:#fff;box-shadow:var(--sh)}'; document.head.appendChild(st); })();
 function labelFit(s, o) {
   const avail = o.w - 2 * o.m, notes = [], mm = p => p * 0.3528;
-  let fs = Math.max(7, o.name); const cap = avail / (fs * 0.3528 * 0.52); if (s.name.length > cap) fs = Math.max(7, fs * cap / s.name.length);
+  let fs = Math.max(7, o.name); const cap = (avail - 1) / (fs * 0.3528 * 0.64); if (s.name.length > cap) fs = Math.max(7, fs * cap / s.name.length);
   const subN = Math.max(6, Math.min(9, o.name - 3)); let bar = o.bar, showC = !!o.center, showY = !!(o.year && yearName(s.yearId));
   const H = o.h ? Math.max(8, o.h - 0.5) : 0;
   if (H) {
