@@ -7,29 +7,56 @@ Object.assign(DEF, {
   waTplPresent: 'attendance_present', waTplLate: 'attendance_late', waTplAbsent: 'attendance_absent', waTplPay: 'payment_received', waTplDaily: 'daily_summary',
   waSendPresent: true, waSendLate: true, waSendAbsent: true, waSendPay: true, waSendDaily: true
 });
-const WA_KINDS = [['Present', 'حضور'], ['Late', 'تأخير'], ['Absent', 'غياب'], ['Pay', 'دفع'], ['Daily', 'ملخص يومي للمدرس']];
+Object.assign(DEF, {
+  waTplDue: 'payment_due', waTplMonthly: 'monthly_report', waTplStar: 'weekly_star', waTplNotice: 'center_notice',
+  waSendDue: true, waSendMonthly: true, waSendStar: true, waSendNotice: true,
+  waModePresent: 'auto', waModeLate: 'auto', waModeAbsent: 'auto', waModePay: 'auto', waModeDue: 'approve', waModeMonthly: 'approve', waModeStar: 'approve', waModeNotice: 'approve', waModeDaily: 'auto',
+  waCapDay: 0, waQuiet: false, waQuietFrom: '22:00', waQuietTo: '07:00', waExclGroups: [],
+  monthlyAuto: false, monthlyDay: 1, monthlyTime: '10:00'
+});
+const WA_KINDS = [['Present', 'حضور'], ['Late', 'تأخير'], ['Absent', 'غياب'], ['Pay', 'دفع'], ['Due', 'تذكير اشتراك'], ['Monthly', 'تقرير شهري'], ['Star', 'شهادة متفوق'], ['Notice', 'إعلان'], ['Daily', 'ملخص يومي للمدرس']];
+const WA_BODY = {
+  present: 'تم تسجيل حضور الطالب {1} يوم {2} الساعة {3}.', late: 'الطالب {1} حضر يوم {2} الساعة {3} متأخرًا {4} دقيقة.', absent: 'نفيدكم بغياب الطالب {1} عن حصة يوم {2}.',
+  pay: 'تم استلام مبلغ {3} اشتراك {2} للطالب {1}. شكرًا لكم.', due: 'تذكير: اشتراك {2} للطالب {1} لم يُسدد بعد (المتبقي {3}).',
+  monthly: 'التقرير الشهري للطالب {1} عن شهر {2}. الحضور: {3}. الامتحانات: {4}. الاشتراك: {5}. توصيتنا: {6}. مع تحيات {7}.',
+  star: 'مبروك! الطالب {1} هو متفوق الأسبوع ({2}). {3}', notice: 'رسالة من {1}: {2}. مع تحيات إدارة السنتر.', daily: 'ملخص {1}: حضور {2} / غياب {3} / متأخرين {4} / تحصيل {5}.'
+};
+const waText = (kind, params) => (WA_BODY[kind] || '').replace(/\{(\d+)\}/g, (m, i) => params[i - 1] ?? '');
+const waClean = x => String(x ?? '').replace(/[\r\n\t]+/g, ' - ').replace(/ {2,}/g, ' ').trim().slice(0, 900) || '-';
 const cap = k => k[0].toUpperCase() + k.slice(1);
 const waHere = () => localStorage.waHere === '1' && !!S().waUrl;
+const waQuietNow = () => { const c = S(); if (!c.waQuiet) return false; const n = mins(nowTime()), a = mins(c.waQuietFrom), b = mins(c.waQuietTo); if (n == null || a == null || b == null) return false; return a <= b ? (n >= a && n < b) : (n >= a || n < b); };
 
-/* ---------------- طابور الرسائل ---------------- */
-function qWA(kind, s, params, key) {
-  if (!waHere()) return;
-  const c = S(); if (c['waSend' + cap(kind)] === false) return;
-  const to = intlPhone(s.parentPhone || s.phone); if (!to) return;
-  const id = 'wa_' + key; if (mem.outbox.has(id)) return;
-  save('outbox', { id, kind, to, template: c['waTpl' + cap(kind)], lang: c.waLang || 'ar', params: params.map(x => String(x ?? '').trim() || '-'), studentId: s.id || '', name: s.name || '', status: 'pending', tries: 0, at: Date.now() }, { keep: true });
+/* ---------------- طابور الرسائل (مزامَن بين الأجهزة، والإرسال من جهاز واحد) ---------------- */
+function qWA(kind, s, params, key, extra) {
+  const c = S(), K = cap(kind);
+  if (!c.waUrl || !(waHere() || cloud.cfg())) return 'skip';
+  if (c['waSend' + K] === false) return 'skip';
+  const mode = c['waMode' + K] || 'auto'; if (mode === 'off') return 'skip';
+  if (s.noWA) return 'skip';
+  if ((c.waExclGroups || []).includes(s.groupId)) return 'skip';
+  const to = intlPhone(s.parentPhone || s.phone); if (!to) return 'skip';
+  const id = 'wa_' + key; if (mem.outbox.has(id) && !mem.outbox.get(id).deleted) return 'dup';
+  if (c.waCapDay > 0 && s.id && !['monthly', 'star', 'notice', 'daily'].includes(kind)) {
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const n = [...mem.outbox.values()].filter(o => o.studentId === s.id && o.at >= t0.getTime() && o.status !== 'cancelled' && !['monthly', 'star', 'notice', 'daily'].includes(o.kind)).length;
+    if (n >= c.waCapDay) return 'cap';
+  }
+  const p = params.map(waClean);
+  save('outbox', { id, kind, to, template: c['waTpl' + K], lang: c.waLang || 'ar', params: p, text: waText(kind, p), ...(extra || {}), studentId: s.id || '', name: s.name || '', status: mode === 'approve' ? 'review' : 'pending', tries: 0, at: Date.now() });
   flushWA();
+  return mode === 'approve' ? 'review' : 'queued';
 }
 let flushing = false;
 async function flushWA() {
-  if (flushing || !idb || !waHere() || !navigator.onLine) return; flushing = true; const c = S();
+  if (flushing || !idb || !waHere() || !navigator.onLine || waQuietNow()) return; flushing = true; const c = S();
   try {
     const q = [...mem.outbox.values()].filter(o => o.status === 'pending').sort((a, b) => a.at - b.at);
     for (const o of q) {
       try {
-        const r = await fetch(c.waUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret': c.waSecret || '' }, body: JSON.stringify({ to: o.to, template: o.template, lang: o.lang, params: o.params }) });
-        if (r.ok) save('outbox', { ...o, status: 'sent', sentAt: Date.now(), error: '' }, { keep: true });
-        else { const t = await r.text().catch(() => ''), hard = r.status >= 400 && r.status < 500 && r.status !== 429; save('outbox', { ...o, tries: o.tries + 1, status: hard || o.tries + 1 >= 5 ? 'failed' : 'pending', error: (r.status + ' ' + t).slice(0, 300) }, { keep: true }); }
+        const r = await fetch(c.waUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret': c.waSecret || '' }, body: JSON.stringify({ to: o.to, template: o.template, lang: o.lang, params: o.params, mediaId: o.mediaId || '' }) });
+        if (r.ok) save('outbox', { ...o, status: 'sent', sentAt: Date.now(), error: '' });
+        else { const t = await r.text().catch(() => ''), hard = r.status >= 400 && r.status < 500 && r.status !== 429; save('outbox', { ...o, tries: o.tries + 1, status: hard || o.tries + 1 >= 5 ? 'failed' : 'pending', error: (r.status + ' ' + t).slice(0, 300) }); }
       } catch (e) { break; }
       await new Promise(r => setTimeout(r, 350));
     }
@@ -214,7 +241,7 @@ A.saveWA = () => {
   setS(p); toast('تم الحفظ ✅'); ui.render(); flushWA();
 };
 A.testWA = () => { if (!waHere()) return toast('فعّل الإرسال على الجهاز وحط رابط الـ Worker واحفظ الأول', true); if (!S().ownerPhone) return toast('اكتب رقم المدرس واحفظ', true); qWA('daily', { parentPhone: S().ownerPhone, name: 'المدرس' }, [today(), 1, 0, 0, money(0)], 'test_' + Date.now()); toast('اتحطت رسالة تجربة في الطابور'); setTimeout(ui.render, 2500); };
-A.retryWA = () => { [...mem.outbox.values()].filter(o => o.status === 'failed').forEach(o => save('outbox', { ...o, status: 'pending', tries: 0 }, { keep: true })); flushWA(); toast('جاري إعادة المحاولة'); setTimeout(ui.render, 2500); };
+A.retryWA = () => { [...mem.outbox.values()].filter(o => o.status === 'failed').forEach(o => save('outbox', { ...o, status: 'pending', tries: 0 })); flushWA(); toast('جاري إعادة المحاولة'); setTimeout(ui.render, 2500); };
 
 /* ================= محوّل نسخة النظام القديم (ALAMIN_BACKUP_V3) ================= */
 function mapAlamin(root) {

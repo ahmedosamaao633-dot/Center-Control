@@ -22,8 +22,8 @@ const libs = {};
 function loadLib(url) { return libs[url] || (libs[url] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = url; s.onload = res; s.onerror = () => rej(new Error('lib')); document.head.appendChild(s); })); }
 
 /* ================= قاعدة البيانات المحلية (IndexedDB) ================= */
-const SYNC = ['years', 'groups', 'students', 'attendance', 'exams', 'scores', 'payments', 'expenses', 'settings', 'closings', 'courses', 'enrolls'];
-const TABLES = [...SYNC, 'snapshots', 'legacy', 'outbox', 'kv', 'pq'];
+const SYNC = ['years', 'groups', 'students', 'attendance', 'exams', 'scores', 'payments', 'expenses', 'settings', 'closings', 'courses', 'enrolls', 'outbox'];
+const TABLES = [...SYNC, 'snapshots', 'legacy', 'kv', 'pq'];
 const mem = {};
 let idb, dirty = false;
 function openDB() {
@@ -49,7 +49,7 @@ function save(t, rec, o = {}) {
   if (SYNC.includes(t)) { dirty = true; if (!o.noSync) cloud.push(t, rec); }
   return rec;
 }
-function remove(t, id) { const r = mem[t].get(id); if (r) { r.deleted = true; save(t, r); } }
+function remove(t, id) { if (!canDelete(t)) return deniedMsg(); const r = mem[t].get(id); if (r) { r.deleted = true; save(t, r); } }
 function bulkSave(t, recs, o = {}) {
   const tx = idb.transaction(t, 'readwrite'), st = tx.objectStore(t), now = Date.now();
   recs.forEach(r => { if (!o.keep) r.updatedAt = now; mem[t].set(r.id, r); st.put(r); });
@@ -66,8 +66,21 @@ const DEF = {
   tplPay: 'تم استلام مبلغ [[amount]] اشتراك شهر [[month]] للطالب [[name]]. شكرًا لكم.',
   tplDue: 'تذكير: اشتراك شهر [[month]] للطالب [[name]] لم يُسدد بعد (المتبقي [[amount]]).'
 };
-const S = () => ({ ...DEF, ...(mem.settings.get('main') || {}) });
-const setS = p => save('settings', { ...S(), ...p });
+const SECRET_KEYS = ['waSecret', 'platKey'];
+const secrets = () => { try { return JSON.parse(localStorage.getItem('secrets') || '{}'); } catch (e) { return {}; } };
+const S = () => ({ ...DEF, ...(mem.settings.get('main') || {}), ...secrets() });
+const setS = p => {
+  const sec = secrets(), pub = {}; Object.entries(p).forEach(([k, v]) => { if (SECRET_KEYS.includes(k)) sec[k] = v; else pub[k] = v; });
+  try { localStorage.setItem('secrets', JSON.stringify(sec)); } catch (e) { }
+  const cur = { ...(mem.settings.get('main') || {}) }; SECRET_KEYS.forEach(k => delete cur[k]);
+  save('settings', { ...DEF, ...cur, ...pub });
+};
+/* ---- الأدوار: مدرس / مساعد ---- */
+let ROLE = 'teacher';
+const isTeacher = () => ROLE === 'teacher';
+const canDelete = t => ROLE === 'teacher' || (S().asstFix === true && (t === 'attendance' || t === 'scores'));
+const DEL_WORDS = /^(حذف|إلغاء الوصل|مسح|استعادة|استيراد|استبدال|إفراغ)/;
+const deniedMsg = () => toast('🔒 المسح للمدرس فقط', true);
 
 /* ================= دوال المجال ================= */
 const activeStudents = () => all('students').filter(s => s.active !== false);
@@ -86,7 +99,7 @@ const groupOpts = (sel, ph) => optList(all('groups').map(g => ({ v: g.id, t: g.n
 let modalBtns = [], modalCleanup = null;
 function modal(title, body, btns = []) {
   closeModal();
-  $('#modal').innerHTML = `<div class="ov"><div class="box"><div class="mh"><b>${title}</b><button class="x" data-act="closeM">✕</button></div><div class="mb">${body}</div>${btns.length ? `<div class="mf">${btns.map((b, i) => `<button class="btn ${b.cls || ''}" data-mb="${i}">${b.t}</button>`).join('')}</div>` : ''}</div></div>`;
+  $('#modal').innerHTML = `<div class="ov"><div class="box"><div class="mh"><b>${title}</b><button class="x" data-act="closeM">✕</button></div><div class="mb">${body}</div>${btns.length ? `<div class="mf">${btns.map((b, i) => (!isTeacher() && DEL_WORDS.test(String(b.t).replace(/<[^>]*>/g, '').trim()) && b.cls === 'er') ? '' : `<button class="btn ${b.cls || ''}" data-mb="${i}">${b.t}</button>`).join('')}</div>` : ''}</div></div>`;
   modalBtns = btns;
   const f = $('#modal input:not([type=hidden]),#modal select'); if (f && !/Mobi/i.test(navigator.userAgent)) f.focus();
 }
@@ -94,7 +107,7 @@ function closeModal() { if (modalCleanup) { modalCleanup(); modalCleanup = null;
 function formData() { const o = {}; $$('#modal [name]').forEach(e => { o[e.name] = e.type === 'checkbox' ? e.checked : e.value.trim(); }); return o; }
 const fld = (label, name, val = '', type = 'text', extra = '') => `<div class="f"><label>${label}</label><input name="${name}" id="${name}" type="${type}" value="${esc(val)}" ${extra}></div>`;
 const sel = (label, name, opts) => `<div class="f"><label>${label}</label><select name="${name}">${opts}</select></div>`;
-function confirmBox(msg, fn, label = 'تأكيد') { modal('تأكيد', `<p>${msg}</p>`, [{ t: 'إلغاء', cls: 'ghost', fn: closeModal }, { t: label, cls: 'er', fn: () => { closeModal(); fn(); } }]); }
+function confirmBox(msg, fn, label = 'تأكيد') { if (!isTeacher() && DEL_WORDS.test(String(msg).replace(/<[^>]*>/g, '').trim()) && !/^(حذف|مسح).*(علامة|درجة)/.test(String(msg).trim())) return deniedMsg(); modal('تأكيد', `<p>${msg}</p>`, [{ t: 'إلغاء', cls: 'ghost', fn: closeModal }, { t: label, cls: 'er', fn: () => { closeModal(); fn(); } }]); }
 
 /* ================= الطباعة ================= */
 async function renderCodes(root) {
@@ -287,20 +300,20 @@ async function importLegacy(file) {
 const routes = {
   dashboard: { t: 'الرئيسية', i: '🏠', g: 'الأساسي' }, attendance: { t: 'الحضور', i: '✅', g: 'الأساسي' }, students: { t: 'الطلاب', i: '👥', g: 'الأساسي' }, groups: { t: 'المجموعات', i: '🗂', g: 'الأساسي' },
   payments: { t: 'المدفوعات', i: '💰', g: 'المالية' }, treasury: { t: 'الخزنة اليومية', i: '🏦', g: 'المالية' }, expenses: { t: 'المصروفات', i: '🧾', g: 'المالية' },
-  exams: { t: 'الامتحانات', i: '📝', g: 'المتابعة' }, reports: { t: 'التقارير', i: '📊', g: 'المتابعة' }, cards: { t: 'طباعة الكروت', i: '🪪', g: 'المتابعة' }, codes: { t: 'أكواد الطلاب', i: '🔑', g: 'المتابعة' }, platform: { t: 'المنصة التعليمية', i: '🌐', g: 'المتابعة' }, settings: { t: 'الإعدادات والنسخ', i: '⚙️', g: 'النظام' }
+  exams: { t: 'الامتحانات', i: '📝', g: 'المتابعة' }, reports: { t: 'التقارير', i: '📊', g: 'المتابعة' }, cards: { t: 'طباعة الكروت', i: '🪪', g: 'المتابعة' }, codes: { t: 'أكواد الطلاب', i: '🔑', g: 'المتابعة' }, platform: { t: 'المنصة التعليمية', i: '🌐', g: 'المتابعة', teacherOnly: true }, settings: { t: 'الإعدادات والنسخ', i: '⚙️', g: 'النظام', teacherOnly: true }
 };
 const mainNav = ['dashboard', 'attendance', 'students', 'payments'];
 const ui = {
-  route() { const p = location.hash.replace(/^#\/?/, '').split('/'); return { name: routes[p[0]] ? p[0] : 'dashboard', arg: p[1] }; },
+  route() { const p = location.hash.replace(/^#\/?/, '').split('/'); const ok = routes[p[0]] && (isTeacher() || !routes[p[0]].teacherOnly); return { name: ok ? p[0] : 'dashboard', arg: p[1] }; },
   render() { const { name, arg } = ui.route(); ui.side(); ui.top(); ui.banner(); $('#view').innerHTML = V[name](arg); (M[name] || (() => { }))(arg); window.scrollTo(0, 0); },
   soft() { clearTimeout(ui._t); ui._t = setTimeout(() => { if (!$('#modal .ov') && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '')) ui.render(); else ui.top(); }, 400); },
   side() {
     const { name } = ui.route(); let h = `<div class="logo">🎓 ${esc(S().center)}</div>`, last = '';
-    Object.entries(routes).forEach(([k, r]) => { if (r.g !== last) { h += `<div class="grp">${r.g}</div>`; last = r.g; } h += `<a href="#/${k}" class="${k === name ? 'on' : ''}"><span>${r.i}</span>${r.t}</a>`; });
+    Object.entries(routes).filter(([k, r]) => isTeacher() || !r.teacherOnly).forEach(([k, r]) => { if (r.g !== last) { h += `<div class="grp">${r.g}</div>`; last = r.g; } h += `<a href="#/${k}" class="${k === name ? 'on' : ''}"><span>${r.i}</span>${r.t}</a>`; });
     $('#side').innerHTML = h;
     $('#bottom').innerHTML = mainNav.map(k => `<a href="#/${k}" class="${k === name ? 'on' : ''}"><span>${routes[k].i}</span>${routes[k].t}</a>`).join('') + `<a data-act="more" class="${mainNav.includes(name) ? '' : 'on'}"><span>☰</span>المزيد</a>`;
   },
-  top() { const { name } = ui.route(), c = cloud.cfg(); $('#top').innerHTML = `<h1>${routes[name].i} ${routes[name].t}</h1>${c ? `<span class="pill ${cloud.status.includes('متصل') ? 'ok' : 'wa'}" title="${esc(cloud.status)}">${cloud.status.includes('متصل') ? '☁️ متزامن' : '☁️ ' + esc(cloud.status)}</span>` : ''}<button class="ib" data-act="theme" title="الوضع الليلي">🌓</button>`; },
+  top() { const { name } = ui.route(), c = cloud.cfg(); $('#top').innerHTML = `<h1>${routes[name].i} ${routes[name].t}</h1>${c ? `<span class="pill ${cloud.status.includes('متصل') ? 'ok' : 'wa'}" title="${esc(cloud.status)}">${cloud.status.includes('متصل') ? '☁️ متزامن' : '☁️ ' + esc(cloud.status)}</span>` : ''}${localStorage.pin ? `<span class="pill ${isTeacher() ? 'ok' : 'wa'}">${isTeacher() ? '👨‍🏫 مدرس' : '👤 مساعد'}</span><button class="ib" data-act="lockNow" title="قفل / تبديل المستخدم">🔒</button>` : ''}<button class="ib" data-act="theme" title="الوضع الليلي">🌓</button>`; },
   banner() {
     const last = S().lastExport || 0, n = all('students').length; let h = '';
     if (n > 0 && !cloud.cfg() && Date.now() - last > 7 * 864e5) h = `<div class="warn"><span>⚠️ آخر نسخة احتياطية محفوظة على جهازك من ${last ? Math.floor((Date.now() - last) / 864e5) + ' يوم' : 'وقت طويل'}. فعّل المزامنة السحابية أو نزّل نسخة.</span><button class="btn sm" data-act="exportNow">نزّل نسخة</button></div>`;
@@ -513,7 +526,7 @@ A.saveTpl = () => { setS({ tplPresent: $('#tplPresent').value, tplAbsent: $('#tp
 A.addYear = () => { const n = $('#ny').value.trim(); if (!n) return; save('years', { id: uid(), name: n, order: all('years').length }); ui.render(); };
 A.renYear = a => { const y = get('years', a.id); modal('تعديل الصف', fld('الاسم', 'name', y.name), [{ t: 'حفظ', fn: d => { if (d.name) save('years', { ...y, name: d.name }); closeModal(); ui.render(); } }]); };
 A.delYear = a => confirmBox('حذف الصف؟', () => { remove('years', a.id); ui.render(); });
-A.setPin = () => { const p = $('#pin').value; if (!p) { localStorage.removeItem('pin'); toast('تم إلغاء القفل'); } else { localStorage.pin = hashPin(p); toast('تم تفعيل القفل ✅'); } $('#pin').value = ''; };
+A.setPin = () => { const p = $('#pin').value; if (!p) { localStorage.removeItem('pin'); localStorage.removeItem('pinA'); toast('تم إلغاء القفل'); } else { localStorage.pin = hashPin(p); toast('تم تفعيل القفل ✅'); } $('#pin').value = ''; };
 A.exportNow = () => { download('edu-center-backup-' + today() + '.json', JSON.stringify(dump())); setS({ lastExport: Date.now() }); toast('تم تنزيل النسخة ✅'); ui.banner(); };
 A.restoreSnap = a => confirmBox('استعادة النسخة دي؟ (هتستبدل البيانات الحالية، وبيتاخد نسخة من الحالي قبلها)', async () => { const s = get('snapshots', a.id) || mem.snapshots.get(a.id); await snapshot('before-restore'); await restoreData(JSON.parse(s.data), true); toast('تمت الاستعادة ✅'); ui.render(); }, 'استعادة');
 A.cloudSetup = () => modal('إعداد المزامنة', `<p style="font-size:13px;color:var(--mu)">الصق إعدادات Firebase (firebaseConfig) والإيميل وكلمة السر اللي عملتها في Firebase Authentication.</p><div class="f"><label>firebaseConfig</label><textarea name="cfg" rows="6" placeholder="{ apiKey: '...', authDomain: '...', projectId: '...' }"></textarea></div>${fld('الإيميل', 'email', localStorage.getItem('cloudEmail') || '', 'email')}${fld('كلمة السر', 'pass', '', 'password')}`, [{
@@ -528,7 +541,8 @@ A.cloudOff = () => confirmBox('فصل المزامنة؟ بياناتك هتفض
 
 /* ---- أحداث عامة ---- */
 A.closeM = closeModal; A.theme = () => { const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; localStorage.theme = t; };
-A.more = () => { $('#modal').innerHTML = `<div class="ov" style="align-items:flex-end"><div class="sheet" style="position:static;width:100%;max-width:520px;border-radius:18px">${Object.entries(routes).filter(([k]) => !mainNav.includes(k)).map(([k, r]) => `<a href="#/${k}" data-act="closeM">${r.i} ${r.t}</a>`).join('')}</div></div>`; };
+A.lockNow = () => location.reload();
+A.more = () => { $('#modal').innerHTML = `<div class="ov" style="align-items:flex-end"><div class="sheet" style="position:static;width:100%;max-width:520px;border-radius:18px">${Object.entries(routes).filter(([k, r]) => !mainNav.includes(k) && (isTeacher() || !r.teacherOnly)).map(([k, r]) => `<a href="#/${k}" data-act="closeM">${r.i} ${r.t}</a>`).join('')}</div></div>`; };
 document.addEventListener('click', e => {
   if (e.target.classList?.contains('ov')) return closeModal();
   const mb = e.target.closest('[data-mb]'); if (mb) { const b = modalBtns[+mb.dataset.mb]; return b && b.fn(formData()); }
@@ -541,10 +555,16 @@ setInterval(() => { if (dirty) snapshot('auto'); }, 5 * 60 * 1000);
 
 /* ---- القفل ---- */
 function hashPin(p) { let h = 5381; const s = 'edu|' + p; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h); }
+function roleGate() {
+  if (ROLE === 'assistant' && S().asstNoMobile !== false && matchMedia('(max-width:800px) and (pointer:coarse)').matches) {
+    const el = $('#lock'); el.hidden = false; el.innerHTML = '<div class="card"><div style="font-size:40px">📵</div><h3>غير مسموح على الموبايل</h3><p style="color:var(--mu);margin:8px 0">تطبيق الموبايل للمدرس فقط. استخدم اللابتوب في السنتر.</p><button class="btn" onclick="location.reload()" style="width:100%">رجوع</button></div>'; return false;
+  }
+  return true;
+}
 function lockScreen() {
   return new Promise(res => {
     const el = $('#lock'); el.hidden = false; el.innerHTML = `<div class="card"><div style="font-size:40px">🔒</div><h3>${esc(S().center)}</h3><input id="lp" type="password" placeholder="الرقم السري" inputmode="numeric" style="text-align:center;margin:10px 0"><button class="btn" id="lb" style="width:100%">دخول</button></div>`;
-    const go = () => { if (hashPin($('#lp').value) === localStorage.pin) { el.hidden = true; el.innerHTML = ''; res(); } else { toast('رقم سري غلط', true); $('#lp').value = ''; } };
+    const go = () => { const h = hashPin($('#lp').value); if (h === localStorage.pin) ROLE = 'teacher'; else if (localStorage.pinA && h === localStorage.pinA) ROLE = 'assistant'; else { toast('رقم سري غلط', true); $('#lp').value = ''; return; } el.hidden = true; el.innerHTML = ''; res(); };
     $('#lb').onclick = go; $('#lp').onkeydown = e => e.key === 'Enter' && go(); $('#lp').focus();
   });
 }
@@ -556,6 +576,7 @@ function lockScreen() {
   if (navigator.storage?.persist) navigator.storage.persist();
   if (!mem.years.size && !mem.students.size) ['الصف الأول الثانوي', 'الصف الثاني الثانوي', 'الصف الثالث الثانوي'].forEach((n, i) => save('years', { id: 'y' + (i + 1), name: n, order: i }, { noSync: true }));
   if (localStorage.pin) await lockScreen();
+  if (!roleGate()) return;
   ui.render(); cloud.init();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => { });
 })();
