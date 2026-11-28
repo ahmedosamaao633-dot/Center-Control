@@ -40,10 +40,21 @@ function loadAll() {
     q.onsuccess = () => { mem[t] = new Map(q.result.map(x => [x.id, x])); res(); };
   })));
 }
-const all = t => [...mem[t].values()].filter(r => !r.deleted);
+/* ---- المراحل: فلتر شامل (لكل تبويب متصفح مرحلته) ---- */
+let STAGE = ''; try { const u = new URLSearchParams(location.search).get('stage'); if (u !== null) sessionStorage.setItem('stage', u); STAGE = sessionStorage.getItem('stage') || ''; } catch (e) { }
+const allRaw = t => [...mem[t].values()].filter(r => !r.deleted);
+const stOf = id => mem.students.get(id)?.yearId;
+const STAGE_F = {
+  students: r => r.yearId === STAGE, groups: r => r.yearId === STAGE, expenses: r => r.yearId === STAGE, courses: r => r.yearId === STAGE,
+  exams: r => r.yearId ? r.yearId === STAGE : (r.groupId ? mem.groups.get(r.groupId)?.yearId === STAGE : false),
+  attendance: r => stOf(r.studentId) === STAGE, payments: r => stOf(r.studentId) === STAGE, scores: r => stOf(r.studentId) === STAGE,
+  enrolls: r => mem.courses.get(r.courseId)?.yearId === STAGE || stOf(r.studentId) === STAGE, closings: r => !r.yearId || r.yearId === STAGE
+};
+const all = t => { const l = allRaw(t); return STAGE && STAGE_F[t] ? l.filter(STAGE_F[t]) : l; };
 const get = (t, id) => { const r = mem[t].get(id); return r && !r.deleted ? r : null; };
 function save(t, rec, o = {}) {
   if (!o.keep) rec.updatedAt = Date.now();
+  if (STAGE && !rec.yearId && !mem[t].has(rec.id) && ['students', 'groups', 'expenses', 'exams', 'courses', 'closings'].includes(t)) rec.yearId = STAGE;
   mem[t].set(rec.id, rec);
   idb.transaction(t, 'readwrite').objectStore(t).put(rec);
   if (SYNC.includes(t)) { dirty = true; if (!o.noSync) cloud.push(t, rec); }
@@ -86,10 +97,10 @@ const deniedMsg = () => toast('🔒 المسح للمدرس فقط', true);
 const activeStudents = () => all('students').filter(s => s.active !== false);
 const yearName = id => get('years', id)?.name || '';
 const groupName = id => get('groups', id)?.name || '';
-const feeOf = s => num(get('groups', s.groupId)?.fee) || num(S().fee);
+const feeOf = s => { const g = get('groups', s.groupId), yc = (S().yearCfg || {})[s.yearId || g?.yearId] || {}, base = num(g?.fee) || num(yc.fee) || num(S().fee); return Math.round(base * (1 - Math.min(100, num(yc.disc)) / 100) * (1 - Math.min(100, num(s.disc)) / 100)); };
 const paidSum = (sid, month) => all('payments').filter(p => p.studentId === sid && p.month === month && p.type !== 'other').reduce((a, p) => a + num(p.amount), 0);
 const payState = (s, month) => { const fee = feeOf(s), paid = paidSum(s.id, month); if (fee <= 0) return { k: 'na', t: 'بدون رسوم', fee, paid }; if (paid >= fee) return { k: 'ok', t: 'مدفوع', fee, paid }; if (paid > 0) return { k: 'wa', t: 'جزئي', fee, paid }; return { k: 'er', t: 'غير مدفوع', fee, paid }; };
-function nextCode() { let m = 1000; all('students').forEach(s => { const n = parseInt(s.code); if (!isNaN(n) && n > m && n < 1e9) m = n; }); return String(m + 1); }
+function nextCode() { let m = 1000; allRaw('students').forEach(s => { const n = parseInt(s.code); if (!isNaN(n) && n > m && n < 1e9) m = n; }); return String(m + 1); }
 function nextReceipt() { const s = S(), n = (s.receiptNo || 0) + 1; setS({ receiptNo: n }); return n; }
 const optList = (arr, sel, ph) => (ph !== undefined ? `<option value="">${esc(ph)}</option>` : '') + arr.map(o => `<option value="${esc(o.v)}"${o.v === sel ? ' selected' : ''}>${esc(o.t)}</option>`).join('');
 const yearOpts = (sel, ph) => optList(all('years').sort((a, b) => (a.order || 0) - (b.order || 0)).map(y => ({ v: y.id, t: y.name })), sel, ph);
@@ -123,15 +134,15 @@ function printHtml(html, size) {
 function cardHtml(s) { return `<div class="idcard"><b>${esc(S().center)}</b><div style="font-size:11px">${esc(yearName(s.yearId))}</div><h4>${esc(s.name)}</h4><div class="qr" data-v="${esc(s.code)}"></div>${barcodeSvg(s.code, { h: 9, narrow: 0.3, maxW: 52 })}<div style="font-size:12px">${esc(barVal(s.code))}</div></div>`; }
 function receiptHtml(p, a4) {
   const s = get('students', p.studentId) || {};
-  return `<div class="rcpt ${a4 ? 'a4' : ''}"><div style="text-align:center"><b style="font-size:16px">${esc(S().center)}</b><div>${esc(S().teacher)}</div></div><hr>
+  return `<div class="rcpt ${a4 ? 'a4' : ''}"><div style="text-align:center"><b style="font-size:16px">${esc(S().center)}</b><div>${esc(S().teacher)}</div>${S().centerPhone ? `<div style="font-size:11px">${esc(S().centerPhone)}</div>` : ''}${S().centerAddr ? `<div style="font-size:11px">${esc(S().centerAddr)}</div>` : ''}</div><hr>
   <div class="l"><span>رقم الوصل</span><b>${esc(p.receiptNo || '')}</b></div><div class="l"><span>التاريخ</span><span>${esc(p.date)}</span></div>
   <div class="l"><span>الطالب</span><b>${esc(s.name || '')}</b></div><div class="l"><span>الكود</span><span>${esc(s.code || '')}</span></div>
-  <div class="l"><span>البيان</span><span>${p.type === 'other' ? esc(p.note || 'أخرى') : 'اشتراك ' + esc(monthName(p.month))}</span></div><hr>
-  <div class="l"><b>المبلغ</b><b style="font-size:16px">${money(p.amount)}</b></div><hr><div style="text-align:center;font-size:11px">شكرًا لكم</div></div>`;
+  <div class="l"><span>البيان</span><span>${p.type === 'other' ? esc(p.note || 'أخرى') : (p.mode === 'session' ? esc(p.sessions) + ' حصة × ' + money(p.price) + ' — ' : 'اشتراك ') + esc(monthName(p.month))}</span></div><hr>
+  <div class="l"><b>المبلغ</b><b style="font-size:16px">${money(p.amount)}</b></div>${S().rcptNote ? `<div style="text-align:center;font-size:11px">${esc(S().rcptNote)}</div>` : ''}<hr><div style="text-align:center;font-size:11px">${esc(S().rcptFooter || 'شكرًا لكم')}</div></div>`;
 }
 function showReceipt(p) {
   modal('وصل الدفع', receiptHtml(p), [
-    { t: '🖨 حراري 80mm', cls: 'ghost', fn: () => printThermal(receiptHtml(p), 80) },
+    { t: '🖨 حراري ' + (S().rcptW || 80) + 'mm', cls: 'ghost', fn: () => printThermal(receiptHtml(p), S().rcptW || 80) },
     { t: '🖨 A4', cls: 'ghost', fn: () => printHtml(receiptHtml(p, true), 'A4') },
     { t: 'إغلاق', fn: closeModal }]);
 }
@@ -174,7 +185,7 @@ const cloud = {
 };
 
 /* ================= النسخ الاحتياطي ================= */
-function dump() { const tables = {}; SYNC.forEach(t => tables[t] = all(t)); return { app: 'edu-center', version: 1, at: Date.now(), tables }; }
+function dump() { const tables = {}; SYNC.forEach(t => tables[t] = allRaw(t)); return { app: 'edu-center', version: 1, at: Date.now(), tables }; }
 async function snapshot(kind) {
   if (!idb) return;
   const d = dump(), counts = { students: d.tables.students.length, payments: d.tables.payments.length, attendance: d.tables.attendance.length };
@@ -360,7 +371,7 @@ function studentForm(s) {
 function saveStudent(old, d) {
   if (!d.name) return toast('اكتب الاسم', true);
   if (!d.code) return toast('اكتب الكود', true);
-  if (all('students').some(s => s.code === d.code && s.id !== old?.id)) return toast('الكود ده مستخدم لطالب تاني', true);
+  if (allRaw('students').some(s => s.code === d.code && s.id !== old?.id)) return toast('الكود ده مستخدم لطالب تاني', true);
   const g = get('groups', d.groupId); if (g && !d.yearId) d.yearId = g.yearId || '';
   const rec = save('students', { ...(old || { id: uid(), points: 0 }), ...d });
   closeModal(); toast('تم الحفظ ✅'); ui.render(); return rec;

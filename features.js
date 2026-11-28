@@ -19,7 +19,7 @@ const WA_BODY = {
   present: 'تم تسجيل حضور الطالب {1} يوم {2} الساعة {3}.', late: 'الطالب {1} حضر يوم {2} الساعة {3} متأخرًا {4} دقيقة.', absent: 'نفيدكم بغياب الطالب {1} عن حصة يوم {2}.',
   pay: 'تم استلام مبلغ {3} اشتراك {2} للطالب {1}. شكرًا لكم.', due: 'تذكير: اشتراك {2} للطالب {1} لم يُسدد بعد (المتبقي {3}).',
   monthly: 'التقرير الشهري للطالب {1} عن شهر {2}. الحضور: {3}. الامتحانات: {4}. الاشتراك: {5}. توصيتنا: {6}. مع تحيات {7}.',
-  star: 'مبروك! الطالب {1} هو متفوق الأسبوع ({2}). {3}', notice: 'رسالة من {1}: {2}. مع تحيات إدارة السنتر.', daily: 'ملخص {1}: حضور {2} / غياب {3} / متأخرين {4} / تحصيل {5}.'
+  star: 'مبروك! الطالب {1} هو متفوق الأسبوع ({2}). {3}', notice: 'رسالة من {1}: {2}. مع تحيات إدارة السنتر.', daily: 'تقرير يوم {1}: الحضور {2}. المالية: {3}. الغائبون: {4}. غير المسددين: {5}. المراحل: {6}.'
 };
 const waText = (kind, params) => (WA_BODY[kind] || '').replace(/\{(\d+)\}/g, (m, i) => params[i - 1] ?? '');
 const waClean = x => String(x ?? '').replace(/[\r\n\t]+/g, ' - ').replace(/ {2,}/g, ' ').trim().slice(0, 900) || '-';
@@ -64,7 +64,7 @@ async function flushWA() {
 }
 
 /* ---------------- المؤقّت: غياب تلقائي + تقرير يومي ---------------- */
-function tick() {
+function tick0() {
   if (!idb || !mem.settings) return;
   const t = today(), now = nowTime(), nm = mins(now), c = S();
   if (c.autoAbsent !== false) {
@@ -83,6 +83,7 @@ function tick() {
   }
   flushWA();
 }
+function tick() { const s = STAGE; STAGE = ''; try { tick0(); } finally { STAGE = s; } }
 setInterval(tick, 60000);
 setTimeout(tick, 4000);
 window.addEventListener('online', () => setTimeout(flushWA, 800));
@@ -187,7 +188,7 @@ async function runReport(date, auto) {
     if (how === 'folder') toast('✅ اتحفظ التقرير في مجلد: ' + (mem.kv.get('reportDir')?.name || ''));
     else if (how === 'download') toast('اتنزّل التقرير ✅');
     else { pendingReport = { blob, name, date }; ui.banner(); toast('📄 تقرير اليوم جاهز — اضغط حفظ'); }
-    if (S().ownerPhone) qWA('daily', { parentPhone: S().ownerPhone, name: 'المدرس' }, [date, d.present, d.absent, d.late, money(d.collected)], 'daily_' + date);
+    if (S().ownerPhone) qWA('daily', { parentPhone: S().ownerPhone, name: 'المدرس' }, dailyParams(date, d), 'daily_' + date);
   } catch (e) { if (auto) localStorage.removeItem('lastReport'); else toast('تعذر إنشاء التقرير. محتاج نت أول مرة لتحميل مكتبة PDF', true); }
 }
 A.savePending = async () => { if (!pendingReport) return; const r = await saveReport(pendingReport.blob, pendingReport.name, true); if (r !== 'pending') { toast(r === 'folder' ? '✅ اتحفظ في المجلد' : 'اتنزّل ✅'); pendingReport = null; ui.banner(); } };
@@ -354,9 +355,9 @@ function barcodeSvg(text, o = {}) {
 /* ---- مطابقة الكود ---- */
 function normCode(v) { return String(v ?? '').replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c)).replace(/[۰-۹]/g, c => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)).replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g, '').trim(); }
 function ean13ok(c) { if (!/^\d{13}$/.test(c)) return false; let s = 0; for (let i = 0; i < 12; i++) s += (+c[i]) * (i % 2 ? 3 : 1); return (10 - s % 10) % 10 === +c[12]; }
-function exactStudent(raw) { const c = normCode(raw); return c ? all('students').find(x => String(x.code) === c || x.id === c) || null : null; }
+function exactStudent(raw) { const c = normCode(raw); return c ? allRaw('students').find(x => String(x.code) === c || x.id === c) || null : null; }
 function findStudentByCode(raw) {
-  const c = normCode(raw); if (!c) return null; const list = all('students');
+  const c = normCode(raw); if (!c) return null; const list = allRaw('students');
   let s = exactStudent(c); if (s) return s;
   const lc = c.toLowerCase(); s = list.find(x => String(x.code).toLowerCase() === lc); if (s) return s;
   if (/^\d+$/.test(c)) {

@@ -133,3 +133,25 @@ tr:hover td{background:color-mix(in srgb,var(--pr2) 35%,transparent)}
   #bottom a.on span{background:var(--pr2);border-radius:99px;padding:0 14px;display:inline-block}
 }
 @media print{.hero,.qk{display:none!important}}
+
+/* ===== المراحل / التبويبات / الإعدادات ===== */
+#stagebar{padding:0 20px 8px;position:sticky;top:54px;z-index:4}
+#stagebar[hidden]{display:none}
+.stg{display:flex;gap:6px;overflow-x:auto;padding:4px 2px 6px;scrollbar-width:thin}
+.stg-i{display:inline-flex;align-items:stretch;border:1px solid var(--br);background:var(--card);border-radius:12px;overflow:hidden;flex-shrink:0;box-shadow:var(--sh);transition:box-shadow .15s}
+.stg-i button{border:0;background:none;padding:8px 14px;font-weight:700;cursor:pointer;color:var(--tx)}
+.stg-i a{display:grid;place-items:center;padding:0 9px;color:var(--mu);text-decoration:none;border-inline-start:1px solid var(--br);font-size:13px}
+.stg-i a:hover{background:var(--pr2);color:var(--pr)}
+.stg-i.on{background:var(--gr);border-color:transparent}.stg-i.on button,.stg-i.on a{color:#fff}.stg-i.on a{border-color:rgba(255,255,255,.3)}
+#stabs{display:flex;gap:6px;overflow-x:auto;padding:2px 0 12px;position:sticky;top:96px;z-index:3;background:var(--bg)}
+#stabs button{border:1px solid var(--br);background:var(--card);border-radius:99px;padding:8px 14px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:var(--sh)}
+#stabs button.on{background:var(--gr);color:#fff;border-color:transparent}
+.seg{display:inline-flex;background:var(--pr2);border-radius:10px;padding:3px}
+.seg button{border:0;background:none;padding:6px 14px;border-radius:8px;font-weight:700;cursor:pointer;color:var(--pr)}
+.seg button.on{background:var(--card);box-shadow:var(--sh)}
+.swatches{display:flex;gap:8px}.sw{width:34px;height:34px;border-radius:50%;border:3px solid var(--card);box-shadow:0 0 0 1px var(--br);cursor:pointer}.sw.on{box-shadow:0 0 0 3px var(--pr)}
+.it-row input{padding:7px 10px}
+.fee-card{border-inline-start:4px solid var(--pr)}
+@media(max-width:800px){#stagebar{padding:0 12px 6px;top:50px}#stabs{top:90px}}
+@media print{#stagebar{display:none!important}}
+.row .g>small{display:block}
